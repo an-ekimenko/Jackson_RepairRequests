@@ -4,6 +4,43 @@
 
 ---
 
+## 📋 Problem Statement & Purpose
+
+In large-scale enterprise environments, extracting operational data from centralized ERP systems (like 1C:TOiR) directly into modern analytical platforms (like SAP BW/4HANA) often introduces significant architectural friction. Traditional middleware or direct heavy queries can cause performance degradation, security gaps, and high maintenance overhead.
+
+This project is part of a **unified suite of lightweight integration modules** designed to solve these common corporate data-pipeline challenges:
+* **Infrastructure Resource Savings:** Decouples heavy corporate systems by introducing a high-performance, stateless Java agent that staging-buffers data directly into MS SQL.
+* **Overcoming Network Restrictions:** Out-of-the-box bypasses strict network limitations, misconfigured firewalls, and legacy web-server authentication layouts.
+* **Traffic & Data Minimization:** Instead of dumping complete raw databases, each module filters, structures, and converts granular payloads on-the-fly, reducing subsequent ETL pipeline load in SAP.
+
+---
+
+## 🔍 Integration Challenges & Solutions
+
+### 1. Anonymous IIS & Stateless 1C Mode
+* **Issue:** The target Microsoft IIS 10.0 web server runs with *Anonymous Authentication* enabled. Acting as a transparent proxy, IIS passes raw inbound traffic directly to the `wsisapi.dll` (1C extension module) without performing standard HTTP challenge-response negotiations.
+* **Root Cause:** By default, Apache HttpClient 5 issues an initial anonymous request and waits for an HTTP `401 Unauthorized` challenge before transmitting credentials. However, the `wsisapi.dll` module fails to process this negotiation flow under anonymous IIS configs and immediately drops the session on the first unauthenticated packet.
+* **Solution:** Implemented **Preemptive Authentication** using `BasicCredentialsProvider`, `AuthCache`, and `HttpClientContext`. This forces the Java client to inject the `Authorization: Basic ...` header into the very first network packet sent over the outbound socket.
+
+### 2. URL UserInfo Deprecation Policy (`ClientProtocolException`)
+* **Issue:** Attempting to pass credentials directly within the URL string (`https://domain.by...`) caused the application to crash locally with a `Request URI authority contains deprecated userinfo component` validation exception.
+* **Root Cause:** Apache HttpClient 5 strictly enforces the modern **RFC 3986** security specification, inherently blocking raw plain-text credentials embedded inside URL strings to mitigate data leakage risks.
+* **Solution:** Decoupled the physical server address from the request structure. The application now extracts and routes the raw execution path via `relativePath`, while wrapping the physical endpoint context inside a dedicated low-level `HttpHost` configuration component.
+
+---
+
+## 🚀 Features
+
+* **Resilient Enterprise Networking:** Utilizes **Apache HttpClient 5** with a built-in connection pool (`PoolingHttpClientConnectionManager`), providing a solid foundation for robust, high-performance web service interactions.
+* **Automated Fault-Tolerance:** Replaces fragile manual loops with a declarative `DefaultHttpRequestRetryStrategy` executing an exponential backoff algorithm (up to 5 attempts, starting at 30 seconds) to survive temporary network failures.
+* **On-The-Fly SSL Certificate Management:** Features an advanced `KeyStoreManager` that programmatically intercepts remote certificate chains during SSL handshakes and updates the local JVM `cacerts` file. It hot-swaps the memory-resident `SSLContext` dynamically without requiring an application restart.
+* **Robust JSON Deserialization:** Configured via Jackson's `ObjectMapper` to gracefully ignore undeclared or unknown API properties (`FAIL_ON_UNKNOWN_PROPERTIES`), preventing runtime crashes during upstream schema updates.
+* **Defensive Parsing & Stream Transformation:** Employs a custom `RR_DataDeserializer` registered via a `SimpleModule` for type-safe mapping. Uses Java Streams to map raw DTO payload arrays into persistent Hibernate entities.
+* **High-Performance Staging Persistence:** Executes optimized, transaction-aware batch operations (`saveOrUpdateBatch`) directly through the DAO layer to minimize round-trips to the MS SQL database.
+* **Pluggable Multi-Schema Authentication:** Out-of-the-box support for `basic`, `token`, or `none` API authorization schemes, dynamically driven by external configuration files.
+
+---
+
 ## 📋 Description
 
 The **Jackson_RepairRequests** application extracts, parses, and stores pending (unclosed) equipment repair requests from gas stations. The application consumes **JSON payloads** from a 1C:TOiR web service and writes the processed records to an **MS SQL** target database, which serves as a reliable staging area for subsequent ETL loads into **SAP BW/4HANA**.
@@ -21,20 +58,6 @@ To optimize data relevance, the system selectively filters and processes data fo
 * **Data Parsing & Binding:** Utilizes the **Jackson** library to deserialize JSON payloads from the web service into intermediate DTOs before converting them into Hibernate entities. Additionally, Jackson is used to parse the application's YAML configuration file into structured properties.
 * **OR/M Layer:** Employs **Hibernate** to manage data persistence and lifecycle operations within the target MS SQL database.
 * **Logging & Auditing:** Captures application metrics and raw database transactions using **P6Spy** and **Log4j2**. P6Spy intercepts native database requests and routes them via the unified **SLF4J** facade to Log4j2, enabling structured logging of formatted SQL queries populated with actual execution parameters.
-
----
-
-## 🔍 Integration Challenges & Solutions
-
-### 1. Anonymous IIS & Stateless 1C Mode
-* **Issue:** The target Microsoft IIS 10.0 web server runs with *Anonymous Authentication* enabled. Acting as a transparent proxy, IIS passes raw inbound traffic directly to the `wsisapi.dll` (1C extension module) without performing standard HTTP challenge-response negotiations.
-* **Root Cause:** By default, Apache HttpClient 5 issues an initial anonymous request and waits for an HTTP `401 Unauthorized` challenge before transmitting credentials. However, the `wsisapi.dll` module fails to process this negotiation flow under anonymous IIS configs and immediately drops the session on the first unauthenticated packet.
-* **Solution:** Implemented **Preemptive Authentication** using `BasicCredentialsProvider`, `AuthCache`, and `HttpClientContext`. This forces the Java client to inject the `Authorization: Basic ...` header into the very first network packet sent over the outbound socket.
-
-### 2. URL UserInfo Deprecation Policy (`ClientProtocolException`)
-* **Issue:** Attempting to pass credentials directly within the URL string (`https://domain.by...`) caused the application to crash locally with a `Request URI authority contains deprecated userinfo component` validation exception.
-* **Root Cause:** Apache HttpClient 5 strictly enforces the modern **RFC 3986** security specification, inherently blocking raw plain-text credentials embedded inside URL strings to mitigate data leakage risks.
-* **Solution:** Decoupled the physical server address from the request structure. The application now extracts and routes the raw execution path via `relativePath`, while wrapping the physical endpoint context inside a dedicated low-level `HttpHost` configuration component.
 
 ---
 
@@ -85,7 +108,7 @@ The project follows a clean, layered architecture designed for deterministic bat
 
 ---
 
-## 🚀 Prerequisites
+## 📋 Prerequisites
 
 * **Java:** JDK 8 or higher
 * **Database:** MS SQL Server
