@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- TRACE | DEBUG | INFO | WARN | ERROR | FATAL  - and also ALL|OFF enabling/disabling all levels respectively -->
+<Configuration status="WARN">
+  <Appenders>
+    <Console name="Console" target="SYSTEM_OUT">
+      <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+      <ThresholdFilter level="WARN" onMatch="ACCEPT" onMismatch="DENY"/>
+    </Console>
+    
+    <File name="commons-log" fileName="${sys:commonLogFilename}" append="false">
+    
+       <PatternLayout>
+            <pattern>[%-5level] %d{yyyy-MM-dd HH:mm:ss} [%t] %c - %msg%n</pattern>
+       </PatternLayout>
+    </File>
+    
+    <File name="p6spy" fileName="${sys:p6spyLogFilename}" append="false">
+       <PatternLayout>
+            <pattern>[%-5level] %d{yyyy-MM-dd HH:mm:ss} [%t] %c - %msg%n</pattern>
+       </PatternLayout>
+    </File>
+    
+  </Appenders>
+  <Loggers>
+  <Logger name="org.hibernate" level="warn" additivity="false">
+      <AppenderRef ref="commons-log" />
+  </Logger>
+  <Logger name="p6spy" level="warn" additivity="false">
+      <AppenderRef ref="p6spy"/>
+  </Logger>
+  <Logger name="repair_request.RepairRequest_App" level="info" additivity="false">
+      <AppenderRef ref="commons-log"/>
+  </Logger>
+  <Root level="info">
+      <AppenderRef ref="commons-log"/>
+  </Root>
+  </Loggers>
+</Configuration>

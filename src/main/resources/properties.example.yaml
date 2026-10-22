@@ -1,0 +1,8 @@
+toir-api:
+  endpoint: https://beloil.by
+  auth:
+    type: basic # Options - basic, token, none
+    username: your_username_here
+    password: your_password_here
+    # Used only for type: token
+    token: your_token_here

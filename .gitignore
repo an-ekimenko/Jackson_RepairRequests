@@ -1,0 +1,16 @@
+# Target build directory
+target/
+
+# Log files and directories
+logs/
+*.log
+
+# Eclipse / Spring Tool Suite (STS) project files
+.project
+.classpath
+.settings/
+.factorypath
+
+src/main/resources/Hibernate.cfg.xml
+
+src/main/resources/properties.yaml
