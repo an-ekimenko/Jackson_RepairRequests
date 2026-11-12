@@ -10,6 +10,31 @@
 
 ---
 
+## 🚀 Features
+
+* **Modular Dependency Injection Architecture:** Powered by **Google Guice 7** (`RRAppModule`), cleanly decoupling configuration, networking, serialization, and persistence layers while separating the bootstrapper (`MainLauncher`) from the stateless pipeline orchestrator (`RR_App`).
+* **Resilient Enterprise Networking & 1C/IIS Diagnostics:** Utilizes **Apache HttpClient 5** with a managed connection pool (`PoolingHttpClientConnectionManager`), Preemptive Basic Authentication (`BasicAuthCache`), and built-in wire-level request/response tracing (`HttpRequestInterceptor`) for rapid troubleshooting of `wsisapi.dll` gateways.
+* **Automated Fault-Tolerance:** Replaces fragile manual loops with a declarative `DefaultHttpRequestRetryStrategy` executing retry attempts (up to 5 attempts at 30-second intervals) to survive temporary network failures.
+* **State-Aware On-The-Fly SSL Certificate Management:** Features `CertUpdater` and `KeyStoreManager` to programmatically intercept remote certificate chains and update the local JVM `cacerts` store, deferring `CloseableHttpClient` and `SSLContext` initialization until the truststore is fully synchronized.
+* **Pluggable Multi-Schema & OAuth2 Authentication:** Out-of-the-box support for `basic`, static `token`, `oauth2` (Client Credentials Grant with in-memory token caching and expiration tracking), and `none` authorization schemes, dynamically driven by external YAML configuration (`config/properties.yaml`).
+* **Defensive JSON Parsing & Stream Deduplication:** Employs a custom `RR_DataDeserializer` registered via Jackson's `SimpleModule` for type-safe mapping and numeric sanitization. Uses Java Streams to filter critical gas station equipment (`_CF`, `_PPS`, `_VC`) and deduplicate entities by composite primary key (`RepairRequests_PK`) prior to persistence.
+* **High-Performance Staging Persistence:** Executes optimized, transaction-aware batch operations (`saveOrUpdateBatch` with periodic `flush()` and `clear()`) through a Guice-managed Hibernate 6+ DAO singleton to minimize round-trips to the MS SQL database.
+* **External Monitoring & Scheduler Integration:** Automatically generates a machine-readable YAML execution summary (`exchange/result.yaml` containing timestamp, exit code, and processed record count) via `ResultFileWriter` alongside standard OS exit codes (`0` or `1`) and Log4j2/P6Spy audit logs.
+
+
+---
+## 📋 Description
+
+The **Jackson_RepairRequests** application extracts, parses, and stores pending (unclosed) equipment repair requests from gas stations. The application consumes **JSON payloads** from a 1C:TOiR web service and writes the processed records to an **MS SQL** target database, which serves as a reliable staging area for subsequent ETL loads into **SAP BW/4HANA**.
+
+To optimize data relevance, the system selectively filters and processes data for a predefined set of critical gas station equipment codes, specifically targeting:
+* **Coffee machines**
+* **Vacuum cleaners**
+* **Tire inflation stations**
+
+---
+
+
 ## Key Architectural Highlights
 
 * **Dependency Injection Architecture:** Powered by **Google Guice 7** (`RRAppModule`), decoupling configuration, networking, serialization, and persistence layers.
@@ -17,7 +42,24 @@
   * **State-Aware Lazy Initialization:** Defers `CloseableHttpClient` instantiation until after `CertUpdater` synchronizes the remote TLS certificate chain into the local JVM `cacerts` store.
   * **IIS / Stateless 1C Compatibility:** Splits target endpoints into `HttpHost` + `relativePath`, enforces *Preemptive Basic Authentication* (`BasicAuthCache` + `HttpClientContext`), and retains explicit `Host` and `Authorization` headers to comply with `wsisapi.dll` gateway constraints.
   * **Multi-Schema Authentication:** Supports `none`, `basic`, static `token`, and `oauth2` (Client Credentials Grant with in-memory token caching and expiration tracking).
-  * **Connection Pooling & Retries:** Backed by `PoolingHttpClientConnectionManager` with configurable connection/response timeouts and `DefaultHttpRequestRetryStrategy` (up to 5 attempts at 30-second intervals).
+  * **Full Wire Diagnostics for 1C/IIS Troubleshooting:** Embeds a custom `HttpRequestInterceptor` alongside detailed response tracing to output outgoing HTTP methods, target hosts, relative URIs, full request headers, response status codes, and raw error bodies directly to console/runtime logs—enabling rapid diagnosis of `wsisapi.dll` gateway issues without external traffic sniffers.
+    * **`HTTP Wire Diagnostics (stdout / Console Output)`**: Emitted during execution by `RR_HttpClient` to trace exact request headers and gateway responses when diagnosing 1C/IIS (`wsisapi.dll`) connectivity:
+     ```
+     text
+     === OUTGOING HTTP REQUEST ===
+     Method: GET
+     Request URI: /toir/hs/RepairRequests/get?DateBegin=20260101000000&DateEnd=20261231235959
+     Target Host: https://your-1c-host
+     Headers:
+       Accept: application/json, text/plain, */*
+       User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0
+       Host: your-1c-host
+       Authorization: Basic <BASE64_CREDENTIALS>
+       Accept-Encoding: gzip, x-gzip, deflate
+     =============================
+     HTTP Response Code: 200
+     ```
+* **Connection Pooling & Retries:** Backed by `PoolingHttpClientConnectionManager` with configurable connection/response timeouts and `DefaultHttpRequestRetryStrategy` (up to 5 attempts at 30-second intervals).
 * **Fault-Tolerant Data Parsing (`RR_DataDeserializer`):** Safely extracts 1C date-time strings (`dd.MM.yyyy H:mm:ss`), sanitizes dirty numeric strings while preserving leading minus signs, and prevents `Integer` overflow exceptions.
 * **Domain Filtering & Composite-Key Deduplication (`RR_App`):** Filters incoming payloads by critical equipment SUID suffixes (`_CF`, `_PPS`, `_VC`) and deduplicates records by composite primary key (`RepairRequests_PK`) via Java Streams prior to database persistence.
 * **High-Throughput Batch Persistence (`RepairRequests_DAO`):** Uses Hibernate 6+ `merge()`, periodic `flush()`, and `clear()` every 50 records to prevent first-level cache memory overhead.
@@ -91,7 +133,7 @@ RepairRequests/
 * **`YAMLConfigLoader`** — Loads and validates `config/properties.yaml` using Jackson's `YAMLFactory` with strict *Fail-Fast* error handling.
 
 ### Network Layer (`repair_requests.network`)
-* **`RR_HttpClient`** — Guice-managed singleton wrapping **Apache HttpClient 5**. Dynamically calculates `DateBegin` and `DateEnd` parameters for the current year (`Europe/Minsk`), synchronizes TLS certificates via `CertUpdater` before `SSLContext` initialization, enforces Preemptive Basic Auth and IIS-compatible headers, caches OAuth2 tokens, and outputs wire diagnostics.
+* **`RR_HttpClient`** — Guice-managed singleton wrapping **Apache HttpClient 5**. Dynamically calculates `DateBegin` and `DateEnd` parameters for the current year (`Europe/Minsk`), synchronizes TLS certificates via `CertUpdater` before `SSLContext` initialization, enforces Preemptive Basic Auth and IIS-compatible headers, caches OAuth2 tokens, and provides full wire-level HTTP request/response diagnostics for troubleshooting 1C/IIS connectivity issues.
 
 ### Serialization, Domain Models & Persistence (`jackson_json`, `model`, `hibernate`)
 * **`RR_DataDeserializer`** — Custom Jackson `StdDeserializer` that safely parses Russian-keyed JSON fields from 1C:TOiR, converting `dd.MM.yyyy H:mm:ss` timestamps and stripping non-numeric artifacts from integer fields without throwing overflow exceptions.
@@ -176,29 +218,6 @@ The test suite (`src/test/java/repair_requests/`) uses **JUnit 5** and **Mockito
 * **Issue:** Attempting to pass credentials directly within the URL string (`https://domain.by...`) caused the application to crash locally with a `Request URI authority contains deprecated userinfo component` validation exception.
 * **Root Cause:** Apache HttpClient 5 strictly enforces the modern **RFC 3986** security specification, inherently blocking raw plain-text credentials embedded inside URL strings to mitigate data leakage risks.
 * **Solution:** Decoupled the physical server address from the request structure. The application now extracts and routes the raw execution path via `relativePath`, while wrapping the physical endpoint context inside a dedicated low-level `HttpHost` configuration component.
-
----
-
-## 🚀 Features
-
-* **Resilient Enterprise Networking:** Utilizes **Apache HttpClient 5** with a built-in connection pool (`PoolingHttpClientConnectionManager`), providing a solid foundation for robust, high-performance web service interactions.
-* **Automated Fault-Tolerance:** Replaces fragile manual loops with a declarative `DefaultHttpRequestRetryStrategy` executing an exponential backoff algorithm (up to 5 attempts, starting at 30 seconds) to survive temporary network failures.
-* **On-The-Fly SSL Certificate Management:** Features an advanced `KeyStoreManager` that programmatically intercepts remote certificate chains during SSL handshakes and updates the local JVM `cacerts` file. It hot-swaps the memory-resident `SSLContext` dynamically without requiring an application restart.
-* **Robust JSON Deserialization:** Configured via Jackson's `ObjectMapper` to gracefully ignore undeclared or unknown API properties (`FAIL_ON_UNKNOWN_PROPERTIES`), preventing runtime crashes during upstream schema updates.
-* **Defensive Parsing & Stream Transformation:** Employs a custom `RR_DataDeserializer` registered via a `SimpleModule` for type-safe mapping. Uses Java Streams to map raw DTO payload arrays into persistent Hibernate entities.
-* **High-Performance Staging Persistence:** Executes optimized, transaction-aware batch operations (`saveOrUpdateBatch`) directly through the DAO layer to minimize round-trips to the MS SQL database.
-* **Pluggable Multi-Schema Authentication:** Out-of-the-box support for `basic`, `token`, or `none` API authorization schemes, dynamically driven by external configuration files.
-
----
-
-## 📋 Description
-
-The **Jackson_RepairRequests** application extracts, parses, and stores pending (unclosed) equipment repair requests from gas stations. The application consumes **JSON payloads** from a 1C:TOiR web service and writes the processed records to an **MS SQL** target database, which serves as a reliable staging area for subsequent ETL loads into **SAP BW/4HANA**.
-
-To optimize data relevance, the system selectively filters and processes data for a predefined set of critical gas station equipment codes, specifically targeting:
-* **Coffee machines**
-* **Vacuum cleaners**
-* **Tire inflation stations**
 
 ---
 
