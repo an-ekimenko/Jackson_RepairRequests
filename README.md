@@ -23,17 +23,6 @@
 
 
 ---
-## 📋 Description
-
-The **Jackson_RepairRequests** application extracts, parses, and stores pending (unclosed) equipment repair requests from gas stations. The application consumes **JSON payloads** from a 1C:TOiR web service and writes the processed records to an **MS SQL** target database, which serves as a reliable staging area for subsequent ETL loads into **SAP BW/4HANA**.
-
-To optimize data relevance, the system selectively filters and processes data for a predefined set of critical gas station equipment codes, specifically targeting:
-* **Coffee machines**
-* **Vacuum cleaners**
-* **Tire inflation stations**
-
----
-
 
 ## Key Architectural Highlights
 
