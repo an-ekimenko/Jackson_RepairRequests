@@ -40,16 +40,20 @@ public class RRAppModule extends AbstractModule {
 
     @Provides
     @Singleton
-    public ObjectMapper provideObjectMapper() {
+    public ObjectMapper provideObjectMapper(ToirApiConfig config) {
         ObjectMapper mapper = new ObjectMapper();
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
         SimpleModule module = new SimpleModule();
-        module.addDeserializer(RepairRequests_Data.class, new RR_DataDeserializer());
+        module.addDeserializer(
+                RepairRequests_Data.class,
+                new RR_DataDeserializer(config.getEquipmentClassifierCodes())
+        );
         mapper.registerModule(module);
 
         return mapper;
     }
+
 
     @Provides
     public HttpClientBuilder provideHttpClientBuilder() {

@@ -5,12 +5,19 @@ toir-api:
   # Authentication strategy: none | basic | token | oauth2
   auth_type: basic
   
+  
   auth:
     # Used only if auth_type: basic
     basic:
       username: prometheus
       password: Ni32F1ga
   
+  # Target gas station equipment SUID suffixes to filter incoming repair requests
+  equipment_classifier_codes:
+    - "_CF"    # Coffee machines
+    - "_PPS"   # Tire inflation stations
+    - "_VC"    # Vacuum cleaners
+    
   # Connection settings (in milliseconds)
   connection:
     connect_timeout_ms: 70000

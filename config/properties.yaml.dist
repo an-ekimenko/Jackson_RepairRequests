@@ -5,11 +5,6 @@ toir-api:
   # Authentication strategy: none | basic | token | oauth2
   auth_type: basic
 
-  # Connection settings (in milliseconds)
-  connection:
-    connect_timeout_ms: 50000
-    response_timeout_ms: 120000
-
   auth:
     # Used only if auth_type: basic
     basic:
@@ -26,3 +21,15 @@ toir-api:
       client_secret: YOUR_CLIENT_SECRET
       scope: YOUR_SCOPE
       grant_type: client_credentials
+
+  # Target gas station equipment SUID suffixes to filter incoming repair requests
+  equipment_classifier_codes:
+    - "_CF"    # Coffee machines
+    - "_PPS"   # Tire inflation stations
+    - "_VC"    # Vacuum cleaners
+
+  # Connection settings (in milliseconds)
+  connection:
+    connect_timeout_ms: 50000
+    response_timeout_ms: 120000
+

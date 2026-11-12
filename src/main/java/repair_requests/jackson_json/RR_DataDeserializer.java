@@ -1,53 +1,65 @@
 package repair_requests.jackson_json;
 
 import java.io.IOException;
-
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationContext;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 
 import repair_requests.model.RepairRequests_Data;
 
 /**
  * Jackson JSON deserializer for {@link RepairRequests_Data} objects.
+ * Filters records early by configured equipment SUID suffixes.
  */
 public class RR_DataDeserializer extends StdDeserializer<RepairRequests_Data> {
 
-    // Reusable formatter instance to avoid recreating it on every deserialization call
-    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy H:mm:ss");
     private static final Logger logger = LogManager.getLogger(RR_DataDeserializer.class);
+    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy H:mm:ss");
 
+    private final Set<String> allowedSuidCodes;
 
-    public RR_DataDeserializer() { 
-        this(null); 
+    public RR_DataDeserializer() {
+        this(List.of("_CF", "_PPS", "_VC"));
     }
 
-    public RR_DataDeserializer(Class<?> vc) { 
-        super(vc); 
+    public RR_DataDeserializer(List<String> allowedSuidCodes) {
+        super(RepairRequests_Data.class);
+        this.allowedSuidCodes = (allowedSuidCodes != null)
+                ? allowedSuidCodes.stream()
+                    .filter(code -> code != null && !code.isBlank())
+                    .map(String::trim)
+                    .collect(Collectors.toSet())
+                : Set.of();
     }
 
-    @Override 
-    public RepairRequests_Data deserialize(JsonParser jp, DeserializationContext ctxt) 
-            throws IOException, JsonProcessingException {
-        
+    @Override
+    public RepairRequests_Data deserialize(JsonParser jp, DeserializationContext ctxt) throws IOException {
         JsonNode tree = jp.getCodec().readTree(jp);
+
+        // Early SUID filtering before parsing the remaining fields
+        String suidCode = tree.path("КлассификаторОРКодировкаСУИД").asText("").trim();
+        if (!allowedSuidCodes.isEmpty() && allowedSuidCodes.stream().noneMatch(suidCode::endsWith)) {
+            return null;
+        }
+
         RepairRequests_Data rrData = new RepairRequests_Data();
-    	
-        // Safe dates extraction (with blank checks)
-        // Note: JsonNode.path() never returns null; it returns a MissingNode if the field is absent.
-        rrData.setDate(parseDateTime(tree.path("Дата").asText(), DATE_TIME_FORMATTER)); 
+        rrData.setClassifierCodeSUID(suidCode);
+
+        // Safe dates extraction
+        rrData.setDate(parseDateTime(tree.path("Дата").asText(), DATE_TIME_FORMATTER));
         rrData.setDt_from(parseDateTime(tree.path("ДатаНачала").asText(), DATE_TIME_FORMATTER));
         rrData.setDt_to(parseDateTime(tree.path("ДатаОкончания").asText(), DATE_TIME_FORMATTER));
-        
+
         // Safe numbers parsing
         rrData.setApplicationNumber(parseIntSafe(tree.path("Номер").asText()));
         rrData.setOrganizationCodeMDM(parseIntSafe(tree.path("ОрганизацияКодНСИ").asText()));
@@ -55,7 +67,7 @@ public class RR_DataDeserializer extends StdDeserializer<RepairRequests_Data> {
         rrData.setNumberOfOverdueDays(parseIntSafe(tree.path("КоличествоПросроченныхДней").asText()));
         rrData.setRepairFacilityCodeMDM(parseIntSafe(tree.path("ОбъектРемонтаКодНСИ").asText()));
 
-        // Ordinary string processing (returns an empty string "" if the field is empty or missing)
+        // Ordinary string processing
         rrData.setApplicationNumber_PON(tree.path("НомерЗаявкиНаПОНе").asText());
         rrData.setOrganization(tree.path("Организация").asText());
         rrData.setDepartment(tree.path("Подразделение").asText());
@@ -66,26 +78,22 @@ public class RR_DataDeserializer extends StdDeserializer<RepairRequests_Data> {
         rrData.setRepairFacility(tree.path("ОбъектРемонта").asText());
         rrData.setPurchaseRequest(tree.path("ЗаявкаНаЗакупку").asText());
         rrData.setDescriptionOfRenovation(tree.path("ОписаниеРемонта").asText());
-        rrData.setClassifierCodeSUID(tree.path("КлассификаторОРКодировкаСУИД").asText());
 
         return rrData;
     }
-    
-    // A helper method for safe parsing of LocalDateTime
+
     private LocalDateTime parseDateTime(String value, DateTimeFormatter formatter) {
         if (value == null || value.trim().isEmpty()) {
             return null;
         }
         return LocalDateTime.parse(value, formatter);
     }
-    
-    // A helper method for safe parsing of Integer
+
     private Integer parseIntSafe(String value) {
         if (value == null || value.trim().isEmpty()) {
-            return null; // Changed from 0 to null for exact state mapping
+            return null;
         }
-        
-        // Clean the string: retain only digits and an optional leading minus sign
+
         String trimmed = value.trim();
         boolean isNegative = trimmed.startsWith("-");
         String digitsOnly = trimmed.replaceAll("[^0-9]", "");
@@ -97,19 +105,10 @@ public class RR_DataDeserializer extends StdDeserializer<RepairRequests_Data> {
 
         String numbersOnly = isNegative ? "-" + digitsOnly : digitsOnly;
 
-        
-        // Validate if any parseable characters remain after filtering
-        if (numbersOnly.isEmpty() || numbersOnly.equals("-")) {
-            // Recommendation: Use your configured 'logger.warn' here instead of System.err
-            System.err.println("Warning - Unable to extract a number from the string '" + value + "'");
-            return null; 
-        }
-        
         try {
             return Integer.parseInt(numbersOnly);
         } catch (NumberFormatException e) {
-            // Handle numeric overflow cases where the value exceeds Integer.MAX_VALUE
-            System.err.println("Error - The number '" + numbersOnly + "' goes beyond the Integer range");
+            logger.warn("The number '{}' goes beyond the Integer range", numbersOnly);
             return null;
         }
     }

@@ -1,6 +1,7 @@
 package repair_requests;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -24,9 +25,6 @@ import repair_requests.network.RR_HttpClient;
 public class RR_App {
 
     private static final Logger logger = LogManager.getLogger(RR_App.class);
-
-    // Critical gas station equipment SUID suffixes: Coffee machines, Tire inflation, Vacuum cleaners
-    private static final Set<String> ALLOWED_SUID_CODES = Set.of("_CF", "_PPS", "_VC");
 
     private final RR_HttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -62,8 +60,9 @@ public class RR_App {
         logger.info("Deserialized {} raw repair request records from JSON.", rawDataList.size());
 
         // Filter by critical SUID codes, map to JPA entities, and deduplicate by composite PK
+        // Filter out non-matching items (deserialized as null), map to JPA entities, and deduplicate by composite PK
         List<RepairRequests_Entity> entitiesToSave = rawDataList.stream()
-                .filter(this::isAllowedEquipment)
+                .filter(Objects::nonNull)
                 .map(this::mapToEntity)
                 .filter(entity -> entity.getId() != null)
                 .collect(Collectors.toMap(
@@ -75,6 +74,7 @@ public class RR_App {
                 .stream()
                 .toList();
 
+
         logger.info("Filtered and deduplicated {} target entities for persistence.", entitiesToSave.size());
 
         if (entitiesToSave.isEmpty()) {
@@ -84,14 +84,6 @@ public class RR_App {
 
         dao.saveOrUpdateBatch(entitiesToSave);
         return entitiesToSave.size();
-    }
-
-    private boolean isAllowedEquipment(RepairRequests_Data data) {
-        if (data == null || data.getClassifierCodeSUID() == null) {
-            return false;
-        }
-        String code = data.getClassifierCodeSUID().trim();
-        return ALLOWED_SUID_CODES.stream().anyMatch(code::endsWith);
     }
 
     private RepairRequests_Entity mapToEntity(RepairRequests_Data data) {

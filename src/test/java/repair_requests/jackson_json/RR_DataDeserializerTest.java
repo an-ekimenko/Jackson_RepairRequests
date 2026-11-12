@@ -3,6 +3,7 @@ package repair_requests.jackson_json;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -26,7 +27,10 @@ class RR_DataDeserializerTest {
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
         SimpleModule module = new SimpleModule();
-        module.addDeserializer(RepairRequests_Data.class, new RR_DataDeserializer());
+        module.addDeserializer(
+                RepairRequests_Data.class,
+                new RR_DataDeserializer(List.of("_CF", "_PPS", "_VC"))
+        );
         objectMapper.registerModule(module);
     }
 
@@ -74,18 +78,35 @@ class RR_DataDeserializerTest {
     }
 
     @Test
+    @DisplayName("Should return null when SUID code does not match configured equipment list")
+    void testNonMatchingEquipmentReturnsNull() throws Exception {
+        String json = """
+                {
+                  "Дата": "15.03.2026 9:05:30",
+                  "Номер": "999",
+                  "КлассификаторОРКодировкаСУИД": "AZS_OTHER_TRK"
+                }
+                """;
+
+        RepairRequests_Data result = objectMapper.readValue(json, RepairRequests_Data.class);
+        assertNull(result);
+    }
+
+    @Test
     @DisplayName("Should handle blank and missing dates gracefully by returning null")
     void testBlankAndMissingDates() throws Exception {
         String json = """
                 {
                   "Дата": "",
                   "ДатаНачала": "   ",
-                  "Номер": "500"
+                  "Номер": "500",
+                  "КлассификаторОРКодировкаСУИД": "AZS_CF"
                 }
                 """;
 
         RepairRequests_Data result = objectMapper.readValue(json, RepairRequests_Data.class);
 
+        assertNotNull(result);
         assertNull(result.getDate());
         assertNull(result.getDt_from());
         assertNull(result.getDt_to());
@@ -100,8 +121,13 @@ class RR_DataDeserializerTest {
     })
     @DisplayName("Should sanitize dirty numeric strings and extract integer values")
     void testDirtyNumericParsing(String rawNumber, int expected) throws Exception {
-        String json = String.format("{\"Номер\": \"%s\"}", rawNumber);
+        String json = String.format(
+                "{\"Номер\": \"%s\", \"КлассификаторОРКодировкаСУИД\": \"AZS_CF\"}",
+                rawNumber
+        );
         RepairRequests_Data result = objectMapper.readValue(json, RepairRequests_Data.class);
+
+        assertNotNull(result);
         assertEquals(expected, result.getApplicationNumber());
     }
 
@@ -114,9 +140,13 @@ class RR_DataDeserializerTest {
     })
     @DisplayName("Should return null on unparseable strings or Integer overflow")
     void testInvalidOrOverflowNumericParsing(String rawNumber) throws Exception {
-        String json = String.format("{\"КоличествоПросроченныхДней\": \"%s\"}", rawNumber);
+        String json = String.format(
+                "{\"КоличествоПросроченныхДней\": \"%s\", \"КлассификаторОРКодировкаСУИД\": \"AZS_CF\"}",
+                rawNumber
+        );
         RepairRequests_Data result = objectMapper.readValue(json, RepairRequests_Data.class);
+
+        assertNotNull(result);
         assertNull(result.getNumberOfOverdueDays());
     }
 }
-

@@ -11,6 +11,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 import javax.net.ssl.SSLContext;
 
@@ -38,6 +39,7 @@ import org.apache.hc.core5.http.HttpException;
 import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.http.HttpRequest;
 import org.apache.hc.core5.http.HttpRequestInterceptor;
+import org.apache.hc.core5.http.HttpResponse;
 import org.apache.hc.core5.http.NameValuePair;
 import org.apache.hc.core5.http.io.HttpClientResponseHandler;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
@@ -332,12 +334,33 @@ public class RR_HttpClient {
            					System.out.println("=============================\n");
            				}
            			};
+           			
+           			ToirApiConfig.RetryConfig retryCfg = (config.getRetry() != null)
+           			        ? config.getRetry()
+           			        : new ToirApiConfig.RetryConfig();
+
+           			DefaultHttpRequestRetryStrategy retryStrategy = new DefaultHttpRequestRetryStrategy(
+           			        retryCfg.getMaxRetries(),
+           			        TimeValue.ofMilliseconds(retryCfg.getInitialTimeoutMs())
+           			) {
+           			    @Override
+           			    public TimeValue getRetryInterval(HttpResponse response, int execCount, HttpContext context) {
+           			        return calculateBackoffDelay(execCount, retryCfg);
+           			    }
+
+           			    @Override
+           			    public TimeValue getRetryInterval(HttpRequest request, IOException exception, int execCount, HttpContext context) {
+           			        return calculateBackoffDelay(execCount, retryCfg);
+           			    }
+           			};
+
            			httpClient = httpClientBuilder
-           					.setConnectionManager(cm)
-           					.setDefaultRequestConfig(requestConfig)
-           					.setRetryStrategy(new DefaultHttpRequestRetryStrategy(5, TimeValue.ofSeconds(30)))
-           					.addRequestInterceptorFirst(wireLogger)
-           					.build();
+           			        .setConnectionManager(cm)
+           			        .setDefaultRequestConfig(requestConfig)
+           			        .setRetryStrategy(retryStrategy)
+           			        .addRequestInterceptorFirst(wireLogger)
+           			        .build();
+
            		} catch (Exception e) {
            			throw new RuntimeException("Failed to initialize secure HttpClient", e);
             	}
@@ -346,4 +369,24 @@ public class RR_HttpClient {
       }
       return httpClient;
     }
+    
+    /**
+     * Calculates exponential backoff delay with randomization factor (Jitter),
+     * bounded by initial_timeout_ms and max_timeout_ms.
+     */
+    TimeValue calculateBackoffDelay(int attempt, ToirApiConfig.RetryConfig retryCfg) {
+        int safeAttempt = Math.max(1, attempt);
+        double currentInterval = retryCfg.getInitialTimeoutMs()
+                * Math.pow(retryCfg.getMultiplier(), safeAttempt - 1);
+
+        double factor = retryCfg.getRandomizationFactor();
+        double delta = currentInterval * factor;
+        double jitteredDelay = currentInterval + ThreadLocalRandom.current().nextDouble(-delta, delta);
+
+        long boundedDelayMs = Math.round(Math.min(retryCfg.getMaxTimeoutMs(), Math.max(0, jitteredDelay)));
+        logger.warn("Retry attempt #{} scheduled in {} ms (base interval: {} ms, max: {} ms)",
+                safeAttempt, boundedDelayMs, Math.round(currentInterval), retryCfg.getMaxTimeoutMs());
+        return TimeValue.ofMilliseconds(boundedDelayMs);
+    }
+
 }
