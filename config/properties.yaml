@@ -5,7 +5,6 @@ toir-api:
   # Authentication strategy: none | basic | token | oauth2
   auth_type: basic
   
-  
   auth:
     # Used only if auth_type: basic
     basic:
