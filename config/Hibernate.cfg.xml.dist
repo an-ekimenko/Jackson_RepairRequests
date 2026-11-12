@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE hibernate-configuration PUBLIC
+    "-//Hibernate/Hibernate Configuration DTD 3.0//EN"
+    "http://www.hibernate.org/dtd/hibernate-configuration-3.0.dtd">
+<hibernate-configuration>
+<session-factory>
+    <!-- Database driver routing via the P6Spy logging proxy engine -->
+    <property name="hibernate.connection.driver_class">com.p6spy.engine.spy.P6SpyDriver</property>
+
+    <!-- Structural target staging database connection parameters -->
+    <property name = "hibernate.connection.url">
+        jdbc:p6spy:sqlserver://YOUR_DB_HOST:YOUR_DB_PORT;
+        databaseName=YOUR_DB_NAME;
+        user=YOUR_USERNAME;password=YOUR_PASSWORD;
+        encrypt=true;trustServerCertificate=true
+    </property> 
+
+    <!-- Target SQL dialect optimization layer -->
+    <property name="hibernate.dialect">org.hibernate.dialect.SQLServerDialect</property>
+    
+    <!-- Disables standard stdout query mirroring to enforce unified Log4j2 tracing -->
+    <property name="show_sql">false</property>
+    
+</session-factory>
+</hibernate-configuration>

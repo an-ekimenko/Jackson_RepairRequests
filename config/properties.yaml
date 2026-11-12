@@ -1,0 +1,17 @@
+toir-api:
+  # Base URL for fetching passportization data
+  data_endpoint: https://ias.it.beloil.by/cint/stageTOiR_PS/hs/toir/get?mode=UNFULFILLED
+  
+  # Authentication strategy: none | basic | token | oauth2
+  auth_type: basic
+  
+  auth:
+    # Used only if auth_type: basic
+    basic:
+      username: prometheus
+      password: Ni32F1ga
+  
+  # Connection settings (in milliseconds)
+  connection:
+    connect_timeout_ms: 70000
+    response_timeout_ms: 150000

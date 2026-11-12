@@ -11,6 +11,10 @@ import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+
 import repair_requests.model.RepairRequests_Data;
 
 /**
@@ -20,6 +24,8 @@ public class RR_DataDeserializer extends StdDeserializer<RepairRequests_Data> {
 
     // Reusable formatter instance to avoid recreating it on every deserialization call
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy H:mm:ss");
+    private static final Logger logger = LogManager.getLogger(RR_DataDeserializer.class);
+
 
     public RR_DataDeserializer() { 
         this(null); 
@@ -80,7 +86,17 @@ public class RR_DataDeserializer extends StdDeserializer<RepairRequests_Data> {
         }
         
         // Clean the string: retain only digits and an optional leading minus sign
-        String numbersOnly = value.replaceAll("[^0-9-]", "");
+        String trimmed = value.trim();
+        boolean isNegative = trimmed.startsWith("-");
+        String digitsOnly = trimmed.replaceAll("[^0-9]", "");
+
+        if (digitsOnly.isEmpty()) {
+            logger.warn("Unable to extract a number from the string '{}'", value);
+            return null;
+        }
+
+        String numbersOnly = isNegative ? "-" + digitsOnly : digitsOnly;
+
         
         // Validate if any parseable characters remain after filtering
         if (numbersOnly.isEmpty() || numbersOnly.equals("-")) {
