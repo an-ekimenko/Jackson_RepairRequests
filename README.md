@@ -1,26 +1,176 @@
-# Jackson_RepairRequests
+# RepairRequests
 
-**Extracts, parses, and stores pending gas station equipment repair requests from 1C:TOiR into MS SQL staging for SAP BW/4HANA.**
-
----
-
-## 📋 Problem Statement & Purpose
-
-In large-scale enterprise environments, extracting operational data from centralized ERP systems (like 1C:TOiR) directly into modern analytical platforms (like SAP BW/4HANA) often introduces significant architectural friction. Traditional middleware or direct heavy queries can cause performance degradation, security gaps, and high maintenance overhead.
-
-This project is part of a **unified suite of lightweight integration modules** designed to solve these common corporate data-pipeline challenges:
-* **Infrastructure Resource Savings:** Decouples heavy corporate systems by introducing a high-performance, stateless Java agent that staging-buffers data directly into MS SQL.
-* **Overcoming Network Restrictions:** Out-of-the-box bypasses strict network limitations, misconfigured firewalls, and legacy web-server authentication layouts.
-* **Traffic & Data Minimization:** Instead of dumping complete raw databases, each module filters, structures, and converts granular payloads on-the-fly, reducing subsequent ETL pipeline load in SAP.
+**Extracts, parses, filters, and stores gas station equipment repair requests from the 1C:TOiR REST API into a Microsoft SQL Server staging environment for SAP BW/4HANA.**
 
 ---
 
-## 🔍 Integration Challenges & Solutions
+## Overview
 
-### 1. Anonymous IIS & Stateless 1C Mode
-* **Issue:** The target Microsoft IIS 10.0 web server runs with *Anonymous Authentication* enabled. Acting as a transparent proxy, IIS passes raw inbound traffic directly to the `wsisapi.dll` (1C extension module) without performing standard HTTP challenge-response negotiations.
-* **Root Cause:** By default, Apache HttpClient 5 issues an initial anonymous request and waits for an HTTP `401 Unauthorized` challenge before transmitting credentials. However, the `wsisapi.dll` module fails to process this negotiation flow under anonymous IIS configs and immediately drops the session on the first unauthenticated packet.
-* **Solution:** Implemented **Preemptive Authentication** using `BasicCredentialsProvider`, `AuthCache`, and `HttpClientContext`. This forces the Java client to inject the `Authorization: Basic ...` header into the very first network packet sent over the outbound socket.
+**RepairRequests** is a modular Java 17+ command-line ETL utility built on **Apache Maven** and **Google Guice 7**. It fetches repair request records from the 1C:TOiR HTTP gateway over HTTPS for the current calendar year (`Europe/Minsk` timezone), cleanses and deserializes the JSON payload using **Jackson**, filters records for critical gas station equipment (coffee machines, tire inflation stations, vacuum cleaners), performs in-memory composite-key deduplication, and executes transactional batch inserts/updates into a **Microsoft SQL Server** staging database via **Hibernate 6+**. Upon completion, the application generates a machine-readable execution summary in `exchange/result.yaml` and returns standard OS exit codes (`0` or `1`) for integration with enterprise job schedulers.
+
+---
+
+## Key Architectural Highlights
+
+* **Dependency Injection Architecture:** Powered by **Google Guice 7** (`RRAppModule`), decoupling configuration, networking, serialization, and persistence layers.
+* **1C:TOiR & IIS Resilient Network Infrastructure (`RR_HttpClient`):**
+  * **State-Aware Lazy Initialization:** Defers `CloseableHttpClient` instantiation until after `CertUpdater` synchronizes the remote TLS certificate chain into the local JVM `cacerts` store.
+  * **IIS / Stateless 1C Compatibility:** Splits target endpoints into `HttpHost` + `relativePath`, enforces *Preemptive Basic Authentication* (`BasicAuthCache` + `HttpClientContext`), and retains explicit `Host` and `Authorization` headers to comply with `wsisapi.dll` gateway constraints.
+  * **Multi-Schema Authentication:** Supports `none`, `basic`, static `token`, and `oauth2` (Client Credentials Grant with in-memory token caching and expiration tracking).
+  * **Connection Pooling & Retries:** Backed by `PoolingHttpClientConnectionManager` with configurable connection/response timeouts and `DefaultHttpRequestRetryStrategy` (up to 5 attempts at 30-second intervals).
+* **Fault-Tolerant Data Parsing (`RR_DataDeserializer`):** Safely extracts 1C date-time strings (`dd.MM.yyyy H:mm:ss`), sanitizes dirty numeric strings while preserving leading minus signs, and prevents `Integer` overflow exceptions.
+* **Domain Filtering & Composite-Key Deduplication (`RR_App`):** Filters incoming payloads by critical equipment SUID suffixes (`_CF`, `_PPS`, `_VC`) and deduplicates records by composite primary key (`RepairRequests_PK`) via Java Streams prior to database persistence.
+* **High-Throughput Batch Persistence (`RepairRequests_DAO`):** Uses Hibernate 6+ `merge()`, periodic `flush()`, and `clear()` every 50 records to prevent first-level cache memory overhead.
+* **Environment-Aware Configuration (`ConfigPathResolver`):** Dynamically locates external `config/properties.yaml` and `config/Hibernate.cfg.xml` files whether executed from an IDE (`target/classes`) or a packaged standalone JAR.
+* **Execution Reporting & Auditing:** Writes structured status summaries (`datetime`, `returned_code`, `records_processed`) to `exchange/result.yaml` and captures application and raw SQL logs via **Log4j2** and **P6Spy**.
+
+---
+
+## Project Structure
+
+```text
+RepairRequests/
+├── config/
+│   ├── Hibernate.cfg.xml.dist         # Hibernate & MS SQL database connection template
+│   └── properties.yaml.dist           # TOiR API endpoint, timeouts, and auth template
+├── exchange/
+│   └── result.yaml                    # Auto-generated execution summary for job schedulers
+├── logs/
+│   ├── commons.log                    # Application runtime logs (Log4j2)
+│   └── p6spy.log                      # SQL query execution trace logs (P6Spy)
+├── src/
+│   ├── main/
+│   │   ├── java/repair_requests/
+│   │   │   ├── config/
+│   │   │   │   ├── ConfigPathResolver.java
+│   │   │   │   ├── ToirApiConfig.java
+│   │   │   │   └── YAMLConfigLoader.java
+│   │   │   ├── hibernate/
+│   │   │   │   └── RepairRequests_DAO.java
+│   │   │   ├── jackson_json/
+│   │   │   │   └── RR_DataDeserializer.java
+│   │   │   ├── model/
+│   │   │   │   ├── ExecutionResult.java
+│   │   │   │   ├── RepairRequests_Data.java
+│   │   │   │   ├── RepairRequests_Entity.java
+│   │   │   │   └── RepairRequests_PK.java
+│   │   │   ├── network/
+│   │   │   │   └── RR_HttpClient.java
+│   │   │   ├── util/
+│   │   │   │   ├── LogInitializer.java
+│   │   │   │   └── ResultFileWriter.java
+│   │   │   ├── MainLauncher.java
+│   │   │   ├── RRAppModule.java
+│   │   │   └── RR_App.java
+│   │   └── resources/
+│   │       ├── Log4j2.xml
+│   │       └── spy.properties
+│   └── test/
+│       └── java/repair_requests/
+│           ├── jackson_json/
+│           │   └── RR_DataDeserializerTest.java
+│           ├── network/
+│           │   └── RR_HttpClientTest.java
+│           └── RR_AppTest.java
+├── pom.xml
+└── README.md
+```
+
+---
+
+## Key Components Breakdown
+
+### Entry Point & Orchestration (`repair_requests`)
+* **`MainLauncher`** — The definitive application entry point. Initializes runtime logging and JVM `trustStore` properties via `LogInitializer`, bootstraps the Guice DI container, invokes `RR_App`, safely closes the Hibernate `SessionFactory`, writes the execution summary to `exchange/result.yaml`, and exits with code `0` (success) or `1` (failure).
+* **`RRAppModule`** — The Google Guice 7 configuration module binding infrastructure singletons: `ToirApiConfig`, a configured Jackson `ObjectMapper` with `RR_DataDeserializer`, `HttpClientBuilder`, and the Hibernate `SessionFactory`.
+* **`RR_App`** — The stateless ETL pipeline orchestrator. Fetches raw JSON via `RR_HttpClient`, deserializes payloads, filters records matching target equipment SUID suffixes (`_CF`, `_PPS`, `_VC`), deduplicates entities by composite business key (`RepairRequests_PK`), and persists batches via `RepairRequests_DAO`.
+
+### Configuration (`repair_requests.config`)
+* **`ConfigPathResolver`** — Detects the execution context (IDE `target/classes` vs. standalone JAR) and resolves absolute paths to `config/`, `logs/`, and `exchange/` directories relative to the application root.
+* **`ToirApiConfig`** — Jackson DTO mapping the `toir-api` root section of `properties.yaml`, including `data_endpoint`, `auth_type`, nested authentication blocks (`basic`, `static_token`, `oauth2`), and HTTP timeout parameters (`connection`).
+* **`YAMLConfigLoader`** — Loads and validates `config/properties.yaml` using Jackson's `YAMLFactory` with strict *Fail-Fast* error handling.
+
+### Network Layer (`repair_requests.network`)
+* **`RR_HttpClient`** — Guice-managed singleton wrapping **Apache HttpClient 5**. Dynamically calculates `DateBegin` and `DateEnd` parameters for the current year (`Europe/Minsk`), synchronizes TLS certificates via `CertUpdater` before `SSLContext` initialization, enforces Preemptive Basic Auth and IIS-compatible headers, caches OAuth2 tokens, and outputs wire diagnostics.
+
+### Serialization, Domain Models & Persistence (`jackson_json`, `model`, `hibernate`)
+* **`RR_DataDeserializer`** — Custom Jackson `StdDeserializer` that safely parses Russian-keyed JSON fields from 1C:TOiR, converting `dd.MM.yyyy H:mm:ss` timestamps and stripping non-numeric artifacts from integer fields without throwing overflow exceptions.
+* **`RepairRequests_Data`** — DTO representing a raw repair request object from the upstream 1C:TOiR API.
+* **`RepairRequests_Entity` & `RepairRequests_PK`** — JPA entity and `@Embeddable` composite primary key (`Date`, `ApplicationNumber`, `OrganizationCodeMDM`, `DepartmentCodeMDM`) mapped to the target `RepairRequests` table in MS SQL Server.
+* **`ExecutionResult`** — DTO modeling the YAML summary payload written to `exchange/result.yaml`.
+* **`RepairRequests_DAO`** — Guice singleton managing transactional batch persistence into MS SQL Server with periodic `flush()` and `clear()` calls every 50 records.
+
+### Utilities (`repair_requests.util`)
+* **`LogInitializer`** — Sets `javax.net.ssl.trustStore` (`lib/security/cacerts`) and `log.dir` system properties at startup and forces `Log4j2` context reconfiguration.
+* **`ResultFileWriter`** — Serializes `ExecutionResult` metrics (`datetime`, `returned_code`, `records_processed`) into `exchange/result.yaml`.
+
+---
+
+## Prerequisites
+
+* **Java Development Kit (JDK):** Version **17** or higher.
+* **Apache Maven:** Version **3.8+** (for dependency resolution, testing, and JAR packaging).
+* **Database:** Microsoft SQL Server instance accessible via JDBC with the target `RepairRequests` table created.
+* **Internal Cryptographic Module:** `by.beloil.crypto:crypto-cert-loader:0.0.1-SNAPSHOT` installed in your local Maven repository (`~/.m2`) or corporate Nexus/Artifactory.
+
+---
+
+## Configuration Setup
+
+Before running the application, copy the `.dist` template files inside the root `config/` directory and remove the `.dist` suffix:
+
+1. **API & Authentication Settings (`config/properties.yaml`):**
+   Copy `config/properties.yaml.dist` to `config/properties.yaml` and configure your 1C:TOiR endpoint, timeouts, and authentication strategy (`none`, `basic`, `token`, or `oauth2`):
+   ```yaml
+   toir-api:
+     data_endpoint: "https://your-1c-host/toir/hs/RepairRequests/get"
+     auth_type: "basic"
+     connection:
+       connect_timeout_ms: 50000
+       response_timeout_ms: 120000
+     auth:
+       basic:
+         username: "YOUR_USERNAME"
+         password: "YOUR_PASSWORD"
+   ```
+
+2. **Database Connection (`config/Hibernate.cfg.xml`):**
+   Copy `config/Hibernate.cfg.xml.dist` to `config/Hibernate.cfg.xml` and update the JDBC connection URL (wrapped with P6Spy), credentials, and SQL Server dialect:
+   ```xml
+   <property name="hibernate.connection.driver_class">com.p6spy.engine.spy.P6SpyDriver</property>
+   <property name="hibernate.connection.url">jdbc:p6spy:sqlserver://YOUR_DB_HOST:1433;databaseName=YOUR_DB;encrypt=true;trustServerCertificate=true;</property>
+   <property name="hibernate.connection.username">YOUR_DB_USER</property>
+   <property name="hibernate.connection.password">YOUR_DB_PASSWORD</property>
+   ```
+
+> **Security Note:** Never commit `config/properties.yaml` or `config/Hibernate.cfg.xml` containing production credentials to version control. Ensure both files are listed in `.gitignore`.
+
+---
+
+## Output & Monitoring
+
+* **Execution Summary (`exchange/result.yaml`):** Generated automatically upon completion for external job schedulers (e.g., Windows Task Scheduler, cron, Airflow):
+  ```yaml
+  datetime: "2026-11-12 14:00:00"
+  returned_code: 0
+  records_processed: 42
+  ```
+  * `returned_code: 0` — Pipeline completed without errors.
+  * `returned_code: 1` — A fatal configuration, network, parsing, or database error occurred.
+* **Application Logs (`logs/commons.log`):** Detailed execution trace, HTTP request/response diagnostics, and error stack traces managed by Log4j2.
+* **SQL Audit Logs (`logs/p6spy.log`):** Intercepted JDBC statements, bound parameter values, and query execution timings captured by P6Spy.
+
+---
+
+## Testing Architecture
+
+The test suite (`src/test/java/repair_requests/`) uses **JUnit 5** and **Mockito** (`MockedStatic`) to verify core business logic in complete isolation from external network and database resources:
+
+* **`RR_DataDeserializerTest`** — Parameterized tests validating 1C timestamp parsing, safe handling of blank/null fields, sanitization of dirty numeric strings (preserving leading minus signs), and `Integer` overflow protection.
+* **`RR_HttpClientTest`** — Verifies dynamic `DateBegin`/`DateEnd` URI generation, Preemptive Basic Auth (`BasicAuthCache`), static Bearer token headers, *Fail-Fast* config validation, and TLS certificate synchronization via `MockedStatic<CertUpdater>`.
+* **`RR_AppTest`** — End-to-end integration tests verifying SUID equipment filtering (`_CF`, `_PPS`, `_VC`), composite primary key (`RepairRequests_PK`) deduplication, and empty payload handling.
+!!!!!
+
 
 ### 2. URL UserInfo Deprecation Policy (`ClientProtocolException`)
 * **Issue:** Attempting to pass credentials directly within the URL string (`https://domain.by...`) caused the application to crash locally with a `Request URI authority contains deprecated userinfo component` validation exception.
@@ -110,7 +260,7 @@ The project follows a clean, layered architecture designed for deterministic bat
 
 ## 📋 Prerequisites
 
-* **Java:** JDK 8 or higher
+* **Java:** **JDK 17 or higher** *(required by Hibernate 6+, Google Guice 7, Apache HttpClient 5, and Java 14+ Switch Expressions)*
 * **Database:** MS SQL Server
 * **Build System:** Maven (configured via `pom.xml`)
 
@@ -128,7 +278,21 @@ The project follows a clean, layered architecture designed for deterministic bat
    mvn clean package
    ```
 
-3. **Execute the Application:** Run the compiled JAR file natively using the Java CLI. Thanks to the automated manifest configuration in `pom.xml`, the classpath linking to the shared `../dependencies/` folder is resolved out of the box, and the internal logging engine dynamically manages its output file storage targets relative to your current execution scope:
+3. **Execute the Application:**
+
+   **A. Standard Execution Mode**
+
+   Run the compiled JAR file natively using the Java CLI. Thanks to the automated manifest configuration in `pom.xml`, the classpath linking to the shared `../dependencies/` folder is resolved out of the box, and the internal logging engine dynamically manages its output file storage targets relative to your current execution scope:
+
    ```bash
-   java -jar target/Jackson_RepairRequests-0.0.1-SNAPSHOT.jar
+   java -jar /path/to/jck_RepairRequests-0.0.1-SNAPSHOT.jar
    ```
+
+   **B. Dynamic Log Directory Overriding**
+
+   You can dynamically override the absolute destination folder for all runtime traces (`commons.log` and `p6spy.log`) at startup by supplying the `-Dlog.dir` system property flag to the JVM configuration:
+
+   ```bash
+   java -Dlog.dir=/var/log/RepairRequests -jar /path/to/jck_RepairRequests-0.0.1-SNAPSHOT.jar
+   ```
+
