@@ -134,7 +134,40 @@ Jackson_RepairRequests/
 
 1. **Prepare Environment Configurations:**
    Copy the `.dist` template files inside `config/` to their active counterparts and update your credentials:
-   * `config/properties.yaml.dist` → `config/properties.yaml` (1C:TOiR endpoints, classifier codes, timeouts, auth).
+   * `config/properties.yaml.dist` → `config/properties.yaml` (1C:TOiR endpoints, classifier codes, timeouts, retry backoff, and auth):
+     ```yaml
+     toir-api:
+       # Base URL for fetching repair requests data
+       data_endpoint: https://your-1c-host/your-base/hs/toir/get?mode=UNFULFILLED
+
+       # Authentication strategy: none | basic | token | oauth2
+       auth_type: basic
+
+       auth:
+         # Used only if auth_type: basic
+         basic:
+           username: YOUR_USERNAME
+           password: YOUR_PASSWORD
+
+       # Target gas station equipment SUID suffixes to filter incoming repair requests
+       equipment_classifier_codes:
+         - "_CF"    # Coffee machines
+         - "_PPS"   # Tire inflation stations
+         - "_VC"    # Vacuum cleaners
+
+       # Connection settings (in milliseconds)
+       connection:
+         connect_timeout_ms: 70000
+         response_timeout_ms: 150000
+
+       # Exponential backoff retry boundaries (in milliseconds)
+       retry:
+         initial_timeout_ms: 10000
+         max_timeout_ms: 180000
+         multiplier: 2.0
+         randomization_factor: 0.2
+         max_retries: 5
+     ```
    * `config/Hibernate.cfg.xml.dist` → `config/Hibernate.cfg.xml` (MS SQL JDBC URL via P6Spy and credentials).
    > **Security Note:** Keep production credentials out of version control (both files are ignored via `.gitignore`).
 
